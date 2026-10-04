@@ -555,8 +555,27 @@
          *   opts.attempts — override jumlah percobaan (bukan untuk WRITE)
          *   opts.signal   — AbortSignal untuk pembatalan (hanya baca non-kritis)
          */
+        // [TRANSIT] KONTEKS SESI & LOKASI — satu titik untuk SEMUA panggilan.
+        // Payload objek (atau tanpa payload) dilengkapi token sesi dan, saat
+        // user berada di lokasi Transit, `location: 'TRANSIT'`. Backend yang
+        // menentukan aksi mana yang berlokasi dan siapa yang berhak. Payload
+        // berupa teks (checkSession/logoutUser) tidak disentuh.
+        function _denganKonteks(action, payload) {
+            const ambil = window.__sigapCallCtx;
+            if (typeof ambil !== 'function' || AUTH_ACTIONS[action]) return payload;
+            if (payload !== undefined && (payload === null || typeof payload !== 'object' || Array.isArray(payload))) return payload;
+            let c = null;
+            try { c = ambil(action); } catch (e) { c = null; }
+            if (!c || (!c.token && !c.location)) return payload;
+            const p = Object.assign({}, payload || {});
+            if (c.token && !p.token) p.token = c.token;
+            if (c.location && !p.location) p.location = c.location;
+            return p;
+        }
+
         function call(action, payload, opts) {
             opts = opts || {};
+            payload = _denganKonteks(action, payload);   // [TRANSIT]
 
             // Dibuang SAAT PERMINTAAN DIKIRIM, bukan saat berhasil. Sebuah
             // permintaan tulis yang kehabisan waktu di sisi klien BISA SAJA
@@ -701,7 +720,9 @@
                             if (ok)    r = r.withSuccessHandler(ok);
                             if (fail)  r = r.withFailureHandler(fail);
                             if (adaUo) r = r.withUserObject(uo);
-                            return r[prop].apply(r, arguments);
+                            const args = Array.prototype.slice.call(arguments);   // [TRANSIT] konteks lokasi
+                            args[0] = _denganKonteks(prop, args[0]);
+                            return r[prop].apply(r, args);
                         };
                     }
                 });
@@ -4623,6 +4644,122 @@
             outline: none; box-shadow: 0 0 0 3px var(--accent-soft2);
         }
 
+        /* ==========================================================
+           [TRANSIT] LOKASI INVENTORY — pemilih lokasi, penanda lokasi,
+           panel transfer. Hanya token DS v3; Gudang Utama tampil seperti
+           sebelumnya (elemen .only-transit tersembunyi).
+           ========================================================== */
+        body:not(.loc-transit) .only-transit { display: none !important; }
+        body.loc-transit .only-gudang        { display: none !important; }
+
+        /* Pemilih lokasi (desktop: kiri strip navigasi) */
+        .loc-switch { display: none; }
+        @media (min-width: 641px) {
+            .nav-strip { display: flex; align-items: center; gap: var(--sp-3); }
+            .nav-strip .tab-nav { flex: 1 1 auto; min-width: 0; }
+            .loc-switch {
+                display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0;
+                padding: 3px; background: var(--surface2);
+                border: 1px solid var(--border); border-radius: var(--r-md);
+            }
+            body.loc-transit .quick-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        .loc-btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            min-height: 32px; padding: 0 12px;
+            border: 1px solid transparent; border-radius: var(--r-sm);
+            background: transparent; color: var(--text-muted);
+            font-family: var(--font-body); font-size: 0.8125rem; font-weight: 600;
+            white-space: nowrap; cursor: pointer;
+            transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+        }
+        .loc-btn i { font-size: 1rem; }
+        .loc-btn:hover:not(.active) { color: var(--text); background: var(--surface); }
+        .loc-btn.active {
+            background: var(--surface); color: var(--accent); border-color: var(--border);
+            box-shadow: var(--shadow-xs); font-weight: 700;
+        }
+        .loc-btn.active[data-loc="TRANSIT"] { color: var(--amber); }
+        .loc-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft2); }
+
+        /* Penanda lokasi Transit: garis amber tipis di bawah header + pill di judul halaman */
+        body.loc-transit header { box-shadow: inset 0 -2px 0 var(--amber), var(--shadow-xs); }
+        .loc-pill {
+            display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--r-full);
+            background: var(--amber-soft); color: var(--amber);
+            border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+            font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+            line-height: 1.4; vertical-align: middle; white-space: nowrap;
+        }
+        .trf-note {
+            display: flex; gap: var(--sp-2); align-items: flex-start;
+            padding: 10px 12px; border-radius: var(--r-md);
+            background: var(--amber-soft); border: 1px solid color-mix(in srgb, var(--amber) 25%, transparent);
+            color: var(--text-muted); font-size: 0.8125rem; line-height: 1.5;
+        }
+        .trf-note > i { color: var(--amber); font-size: 1.05rem; margin-top: 1px; flex-shrink: 0; }
+        .trf-note b { color: var(--text); }
+
+        /* Baris tabel hasil transfer */
+        .trf-tag {
+            display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 3px;
+            font-size: 0.75rem; font-weight: 500; color: var(--text-muted);
+        }
+        .trf-tag i { color: var(--amber); font-size: 0.9rem; }
+        .trf-lock {
+            display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px;
+            border-radius: var(--r-full); background: var(--surface2); border: 1px solid var(--border);
+            color: var(--text-muted); font-size: 0.6875rem; font-weight: 700; white-space: nowrap;
+        }
+
+        /* Panel transfer di Dashboard Transit */
+        .trf-state {
+            margin-left: 6px; padding: 2px 8px; border-radius: var(--r-full);
+            background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border);
+            font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.02em;
+        }
+        .trf-state.is-synced  { background: var(--green-soft); color: var(--green); border-color: transparent; }
+        .trf-state.is-pending { background: var(--amber-soft); color: var(--amber); border-color: transparent; }
+        .trf-state.is-failed  { background: var(--red-soft);   color: var(--red);   border-color: transparent; }
+        #btn-trf-sync { white-space: nowrap; flex-shrink: 0; }
+        .trf-body { padding: var(--sp-4) var(--sp-5) var(--sp-3); }
+        .trf-last { margin: var(--sp-3) 0 0; font-size: 0.75rem; font-weight: 500; color: var(--text-muted); }
+        #trf-recent { border-top: 1px solid var(--border); }
+        .trf-badge { display: block; margin-top: 2px; text-align: right; font-size: 0.6875rem; font-weight: 700; }
+
+        /* Role FLOOR */
+        .role-badge.role-floor { color: var(--amber); }
+        header .role-badge.role-floor { color: #FCDDB0; }
+        .urole-floor { background: var(--amber-soft); color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 28%, transparent); }
+
+        /* Mobile: chip lokasi di app bar + pemilih lokasi di menu More */
+        .abc-loc { display: none; }
+        .more-loc {
+            display: flex; flex-direction: column; gap: var(--sp-2);
+            padding-bottom: var(--sp-3); margin-bottom: var(--sp-1); border-bottom: 1px solid var(--border);
+        }
+        .more-loc-lbl { font-size: 0.75rem; font-weight: 800; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+        .more-loc-seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: var(--sp-2); }
+        .more-loc-seg .loc-btn { min-height: 44px; background: var(--surface2); border-color: var(--border); }
+        .more-loc-seg .loc-btn.active { background: var(--surface); border-color: var(--accent); }
+        .more-loc-seg .loc-btn.active[data-loc="TRANSIT"] { border-color: var(--amber); }
+        @media (max-width: 640px) {
+            .abc-loc {
+                display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+                min-height: 40px; padding: 0 10px; border-radius: var(--r-full);
+                border: 1px solid var(--border); background: var(--surface2); color: var(--text-muted);
+                font-family: var(--font-body); font-size: 0.75rem; font-weight: 700; cursor: pointer;
+            }
+            .abc-loc i { font-size: 0.95rem; }
+            body.loc-transit .abc-loc {
+                background: var(--amber-soft); color: var(--amber);
+                border-color: color-mix(in srgb, var(--amber) 30%, transparent);
+            }
+            .trf-body { padding: var(--sp-3) var(--sp-4) var(--sp-2); }
+            body.loc-transit .quick-grid > .quick-tile:last-child { grid-column: span 2; }
+        }
+        body.loc-transit .scanf-acts > .scanf-act:last-child { grid-column: span 2; }
+
     </style>
     <!-- bwip-js & jsPDF dipindahkan ke pemuatan on-demand (SIGAPLib) di atas:
          keduanya hanya dipakai layar Cetak Barcode / Lembar Barcode, jadi tidak
@@ -5152,6 +5289,7 @@
                             <option value="ADMIN">ADMIN</option>
                             <option value="MANAGER">MANAGER</option>
                             <option value="STOCK KEEPER" selected>STOCK KEEPER</option>
+                            <option value="FLOOR">FLOOR (khusus Transit)</option>
                         </select>
                     </div>
                     <div>
@@ -5787,7 +5925,7 @@
             <section id="scanf-step-activity" class="scanf-step">
                 <p style="font-size:0.8rem; font-weight:700; color:var(--text-muted); margin:0 0 12px;">Pilih aktivitas untuk <b id="scanf-act-item" style="color:var(--text);">item ini</b></p>
                 <div class="scanf-acts">
-                    <button type="button" class="scanf-act is-in"  id="scanf-act-in"  onclick="scanPickActivity('IN')"><i class="ph ph-arrow-fat-line-up"></i><b>IN</b><span>Barang Masuk</span></button>
+                    <button type="button" class="scanf-act is-in only-gudang"  id="scanf-act-in"  onclick="scanPickActivity('IN')"><i class="ph ph-arrow-fat-line-up"></i><b>IN</b><span>Barang Masuk</span></button>
                     <button type="button" class="scanf-act is-out" id="scanf-act-out" onclick="scanPickActivity('OUT')"><i class="ph ph-arrow-fat-line-down"></i><b>OUT</b><span>Barang Keluar</span></button>
                     <button type="button" class="scanf-act is-opn" id="scanf-act-opn" onclick="scanPickActivity('OPNAME')"><i class="ph ph-clipboard-text"></i><b>OPNAME</b><span>Stock Opname</span></button>
                     <button type="button" class="scanf-act is-ks"  id="scanf-act-ks"  onclick="scanPickActivity('STOCK_CARD')"><i class="ph ph-chart-line-up"></i><b>KARTU STOCK</b><span>Riwayat Pergerakan</span></button>
@@ -6134,10 +6272,24 @@
                 <div class="abc-title" id="app-bar-title">Dashboard</div>
                 <div class="abc-sub" id="app-bar-sub">Ringkasan stok &amp; aktivitas</div>
             </div>
+            <!-- [TRANSIT] Lokasi aktif (mobile). Ketuk = buka menu berisi pemilih lokasi. -->
+            <button type="button" class="abc-loc" id="app-bar-loc" onclick="_locChipTap()" aria-label="Lokasi aktif">
+                <i class="ph ph-warehouse"></i><span>Gudang Utama</span>
+            </button>
             <button type="button" class="btn-icon" id="app-bar-action" onclick="startBarcodeScan({ mode: 'MENU' })"
                     title="Scan Barcode" aria-label="Scan Barcode"><i class="ph ph-barcode"></i></button>
         </div>
         <div class="nav-strip" style="max-width:100%; margin:0 auto; padding:0 20px;">
+            <!-- [TRANSIT] Pemilih lokasi inventory. Halaman yang sama, sumber data berbeda.
+                 Tombol yang tidak menjadi hak role disembunyikan oleh _applyLocationUI(). -->
+            <div class="loc-switch" id="loc-switch" role="group" aria-label="Lokasi inventory">
+                <button type="button" class="loc-btn active" id="loc-btn-GUDANG" data-loc="GUDANG" onclick="setInventoryLocation('GUDANG')" aria-pressed="true">
+                    <i class="ph ph-warehouse"></i><span>Gudang Utama</span>
+                </button>
+                <button type="button" class="loc-btn" id="loc-btn-TRANSIT" data-loc="TRANSIT" onclick="setInventoryLocation('TRANSIT')" aria-pressed="false">
+                    <i class="ph ph-truck"></i><span>Transit</span>
+                </button>
+            </div>
             <nav class="tab-nav">
                 <button class="tab-btn active" id="btn-tab-dashboard" onclick="switchTab('tab-dashboard')">
                     <i class="ph ph-squares-four" style="font-size:1.05rem;"></i> Dashboard
@@ -6189,6 +6341,43 @@
                     <button class="btn-ghost" onclick="_dashRefresh()" style="font-size:0.78rem;"><i class="ph ph-arrows-clockwise"></i> Perbarui</button>
                 </div>
 
+                <!-- [TRANSIT] Status transfer Gudang Utama → Transit — hanya di lokasi Transit.
+                     Memakai komponen dashboard yang sama (dash-card, stat-card, act-row). -->
+                <section class="dash-card trf-panel only-transit" id="trf-panel" aria-label="Transfer Gudang Utama ke Transit">
+                    <div class="dash-card-hd">
+                        <h3><i class="ph ph-truck hd-ico"></i> Gudang Utama &rarr; Transit <span class="trf-state" id="trf-state">Memuat…</span></h3>
+                        <button type="button" class="dash-link" id="btn-trf-sync" onclick="syncTransitNow()" title="Lengkapi Barang Keluar Gudang yang belum masuk Transit (aman diulang)">
+                            <i class="ph ph-arrows-clockwise"></i> Sync Transit
+                        </button>
+                    </div>
+                    <div class="trf-body">
+                        <div class="stat-grid">
+                            <div class="stat-card" style="--stat-color:var(--accent);">
+                                <span class="stat-label">SKU di Transit</span>
+                                <span class="stat-value" id="trf-sku">0</span>
+                                <span class="stat-sub">item dengan stok &gt; 0</span>
+                            </div>
+                            <div class="stat-card" style="--stat-color:var(--green);">
+                                <span class="stat-label">Masuk dari Gudang</span>
+                                <span class="stat-value" id="trf-in">0</span>
+                                <span class="stat-sub">transfer bulan ini</span>
+                            </div>
+                            <div class="stat-card" style="--stat-color:var(--red);">
+                                <span class="stat-label">Keluar Transit</span>
+                                <span class="stat-value" id="trf-out">0</span>
+                                <span class="stat-sub">dokumen SPB-TR bulan ini</span>
+                            </div>
+                            <div class="stat-card" style="--stat-color:var(--amber);">
+                                <span class="stat-label">Tertunda</span>
+                                <span class="stat-value" id="trf-pending">—</span>
+                                <span class="stat-sub" id="trf-pending-sub">memuat…</span>
+                            </div>
+                        </div>
+                        <p class="trf-last" id="trf-last">Status transfer belum termuat.</p>
+                    </div>
+                    <div id="trf-recent"></div>
+                </section>
+
                 <!-- [UPGRADE v2] Dua grid dibungkus satu wrapper agar role STOCK KEEPER bisa
                      menyusun ulang prioritas baris lewat CSS saja (tanpa duplikasi DOM).
                      Admin/Manager: tampilan identik dengan sebelumnya. -->
@@ -6218,7 +6407,7 @@
                 </div>
 
                 <div class="quick-grid">
-                    <button type="button" class="quick-tile" id="dash-qt-in" onclick="startBarcodeScan({ mode: 'IN' })"><div class="quick-ico" style="background:var(--green-soft); color:var(--green);"><i class="ph ph-arrow-fat-line-up"></i></div><b>Barang Masuk</b><span>Scan barcode · catat masuk</span></button>
+                    <button type="button" class="quick-tile only-gudang" id="dash-qt-in" onclick="startBarcodeScan({ mode: 'IN' })"><div class="quick-ico" style="background:var(--green-soft); color:var(--green);"><i class="ph ph-arrow-fat-line-up"></i></div><b>Barang Masuk</b><span>Scan barcode · catat masuk</span></button>
                     <button type="button" class="quick-tile" id="dash-qt-out" onclick="startBarcodeScan({ mode: 'OUT' })"><div class="quick-ico" style="background:var(--red-soft); color:var(--red);"><i class="ph ph-arrow-fat-line-down"></i></div><b>Barang Keluar</b><span>Scan barcode · catat keluar</span></button>
                     <button type="button" class="quick-tile" id="dash-qt-opname" data-sub-default="Scan barcode · hitung stok" data-sub-keeper="Dikelola Manager / Admin" onclick="startBarcodeScan({ mode: 'OPNAME' })"><div class="quick-ico" style="background:var(--blue-soft); color:var(--blue);"><i class="ph ph-clipboard-text"></i></div><b>Stock Opname</b><span>Scan barcode · hitung stok</span></button>
                     <button type="button" class="quick-tile" id="dash-qt-scan" onclick="startBarcodeScan({ mode: 'STOCK_CARD' })"><div class="quick-ico" style="background:var(--purple-soft); color:var(--purple);"><i class="ph ph-chart-line-up"></i></div><b>Kartu Stock</b><span>Scan barcode · riwayat pergerakan</span></button>
@@ -6295,10 +6484,16 @@
                 <div class="card">
                     <div class="card-header">
                         <h2 style="font-size:0.95rem; font-weight:800; color:var(--text); margin:0; display:flex; align-items:center; gap:8px;">
-                            <i class="ph ph-pencil-line" style="color:var(--accent); font-size:1.15rem;"></i> Tambah Item Keluar
+                            <i class="ph ph-pencil-line" style="color:var(--accent); font-size:1.15rem;"></i> Tambah Item Keluar <span class="loc-pill only-transit">Transit</span>
                         </h2>
                     </div>
                     <div style="padding:20px; display:flex; flex-direction:column; gap:16px;">
+                        <!-- [TRANSIT] Barang Keluar Transit = pemakaian / keluar dari floor, selesai di sini. -->
+                        <div class="trf-note only-transit" role="note">
+                            <i class="ph ph-info"></i>
+                            <span>Barang <b>keluar dari Transit</b> (pemakaian floor) dan selesai di sini — tidak kembali ke Gudang Utama.
+                            Qty divalidasi terhadap <b>stok Transit</b> di server.</span>
+                        </div>
                         <div>
                             <label class="lbl">Tanggal Transaksi</label>
                             <input type="date" id="out-tanggal" class="inp">
@@ -6380,14 +6575,14 @@
                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                             <div>
                                 <h2 style="font-size:0.95rem; font-weight:800; color:var(--text); margin:0; display:flex; align-items:center; gap:8px;">
-                                    <i class="ph ph-clock-counter-clockwise" style="color:var(--accent); font-size:1.15rem;"></i> Riwayat Data Keluar
+                                    <i class="ph ph-clock-counter-clockwise" style="color:var(--accent); font-size:1.15rem;"></i> Riwayat Data Keluar <span class="loc-pill only-transit">Transit</span>
                                 </h2>
                                 <p style="font-size:0.75rem; font-weight: 500; color:var(--text-dim); margin:2px 0 0;">Dikelompokkan per tanggal transaksi</p>
                             </div>
                             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                                 <!-- [UPGRADE] Pintu masuk form Transaksi Keluar (menggantikan tab "Keluar"). -->
                                 <button onclick="openOutFormModal()" id="btn-add-outbound" class="btn-primary" style="padding:9px 16px; font-size:0.82rem;">
-                                    <i class="ph ph-minus-circle" style="font-size:1.05rem;"></i> Tambah Keluar barang
+                                    <i class="ph ph-minus-circle" style="font-size:1.05rem;"></i> <span class="only-gudang">Tambah Keluar barang</span><span class="only-transit">Catat Barang Keluar</span>
                                 </button>
                                 <button onclick="printFilteredReport('outbound')" class="btn-ghost" style="color:var(--red); border-color:rgba(220,38,38,0.3); background:var(--red-soft); font-weight:700; padding:9px 12px; font-size:0.8rem;"><i class="ph ph-file-pdf"></i><span class="m-hide"> Print / PDF</span></button>
                                 <button onclick="exportFilteredReportExcel('outbound')" class="btn-ghost" style="color:var(--green); border-color:rgba(22,163,74,0.3); background:var(--green-soft); font-weight:700; padding:9px 12px; font-size:0.8rem;"><i class="ph ph-file-xls"></i><span class="m-hide"> Excel</span></button>
@@ -6436,18 +6631,18 @@
                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                             <div>
                                 <h2 style="font-size:0.95rem; font-weight:800; color:var(--text); margin:0; display:flex; align-items:center; gap:8px;">
-                                    <i class="ph ph-download-simple" style="color:var(--accent); font-size:1.15rem;"></i> Riwayat Data Masuk
+                                    <i class="ph ph-download-simple" style="color:var(--accent); font-size:1.15rem;"></i> Riwayat Data Masuk <span class="loc-pill only-transit">Transit</span>
                                 </h2>
                                 <p style="font-size:0.75rem; font-weight: 500; color:var(--text-dim); margin:2px 0 0;">Dikelompokkan per tanggal masuk</p>
                             </div>
                             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                                <button onclick="openInboundModal()" id="btn-add-inbound" class="btn-primary" style="padding:9px 18px; font-size:0.82rem;">
+                                <button onclick="openInboundModal()" id="btn-add-inbound" class="btn-primary only-gudang" style="padding:9px 18px; font-size:0.82rem;">
                                     <i class="ph ph-plus-circle" style="font-size:1.05rem;"></i> Tambah Barang
                                 </button>
-                                <button onclick="autoFillKet()" id="btn-autofill-ket" class="btn-ghost" style="font-size:0.78rem;" title="Isi otomatis kolom KET yang kosong (GUDANG/TRANSIT) dari Master Item">
+                                <button onclick="autoFillKet()" id="btn-autofill-ket" class="btn-ghost only-gudang" style="font-size:0.78rem;" title="Isi otomatis kolom KET yang kosong (GUDANG/TRANSIT) dari Master Item">
                                     <i class="ph ph-magic-wand"></i> Auto KET
                                 </button>
-                                <button onclick="syncTransit()" id="btn-sync-transit" class="btn-primary" style="padding:9px 16px; font-size:0.78rem;">
+                                <button onclick="syncTransit()" id="btn-sync-transit" class="btn-primary only-gudang" style="padding:9px 16px; font-size:0.78rem;">
                                     <i class="ph ph-truck"></i> Sync Transit → OUT
                                 </button>
                                 <button onclick="printFilteredReport('inbound')" class="btn-ghost" style="color:var(--red); border-color:rgba(220,38,38,0.3); background:var(--red-soft); font-weight:700; padding:9px 12px; font-size:0.8rem;"><i class="ph ph-file-pdf"></i><span class="m-hide"> Print / PDF</span></button>
@@ -6474,6 +6669,12 @@
                             <button onclick="applyFilterInbound()" class="btn-primary" style="padding:9px 16px; font-size:0.8rem;">
                                 <i class="ph ph-funnel"></i> Filter
                             </button>
+                        </div>
+                        <!-- [TRANSIT] Barang Masuk Transit tidak diinput manual. -->
+                        <div class="trf-note only-transit" role="note">
+                            <i class="ph ph-info"></i>
+                            <span>Tercatat <b>otomatis</b> dari Barang Keluar Gudang Utama — EXP Date &amp; Batch ikut dari batch asal (FIFO).
+                            Kolom <b>No Do</b> berisi No SPB sumber; Transfer ID tampil di bawah nama item. Stok awal atau koreksi lewat <b>Stock Opname Transit</b>.</span>
                         </div>
                     </div>
                 </div>
@@ -6502,7 +6703,7 @@
                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                             <div>
                                 <h2 style="font-size:0.95rem; font-weight:800; color:var(--text); margin:0; display:flex; align-items:center; gap:8px;">
-                                    <i class="ph ph-chart-bar" style="color:var(--accent); font-size:1.15rem;"></i> Kartu Stock
+                                    <i class="ph ph-chart-bar" style="color:var(--accent); font-size:1.15rem;"></i> Kartu Stock <span class="loc-pill only-transit">Transit</span>
                                 </h2>
                                 <p style="font-size:0.75rem; font-weight:500; color:var(--text-dim); margin:2px 0 0;">Dikelompokkan berdasarkan kategori item · hanya item Aktif</p>
                             </div>
@@ -6540,7 +6741,7 @@
                         </div>
                         <div id="stock-alert-banner" style="display:none;"></div>
                         <div style="display:flex; gap:10px; align-items:center;">
-                            <select id="filter-stock-lokasi" class="inp" style="width:auto; min-width:140px; cursor:pointer;" onchange="renderFilteredStock()">
+                            <select id="filter-stock-lokasi" class="inp only-gudang" style="width:auto; min-width:140px; cursor:pointer;" onchange="renderFilteredStock()">
                                 <option value="ALL">Semua Lokasi</option>
                                 <option value="GUDANG" selected>Gudang</option>
                                 <option value="TRANSIT">Transit</option>
@@ -6848,6 +7049,9 @@
                             <button type="button" class="seg-btn" id="urole-KEEPER" onclick="setUserRoleFilter('STOCK KEEPER')">
                                 <i class="ph ph-package"></i> Stock Keeper
                             </button>
+                            <button type="button" class="seg-btn" id="urole-FLOOR" onclick="setUserRoleFilter('FLOOR')">
+                                <i class="ph ph-truck"></i> Floor
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -6879,7 +7083,7 @@
                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
                             <div>
                                 <h2 style="font-size:0.95rem; font-weight:800; color:var(--text); margin:0; display:flex; align-items:center; gap:8px;">
-                                    <i class="ph ph-calendar-check" style="color:var(--accent); font-size:1.15rem;"></i> Monitoring Expired Date
+                                    <i class="ph ph-calendar-check" style="color:var(--accent); font-size:1.15rem;"></i> Monitoring Expired Date <span class="loc-pill only-transit">Transit</span>
                                 </h2>
                                 <p style="font-size:0.75rem; font-weight:500; color:var(--text-dim); margin:2px 0 0;">Berdasarkan Exp Date di Data Masuk · penandaan manual tidak mengubah database</p>
                             </div>
@@ -7086,8 +7290,11 @@
                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
                             <div>
                                 <h2 style="font-size:0.95rem; font-weight:800; color:var(--text); margin:0; display:flex; align-items:center; gap:8px;">
-                                    <i class="ph ph-clipboard-text" style="color:var(--accent); font-size:1.15rem;"></i> Stock Opname — Cut Off Bulanan
+                                    <i class="ph ph-clipboard-text" style="color:var(--accent); font-size:1.15rem;"></i> Stock Opname — Cut Off Bulanan <span class="loc-pill only-transit">Transit</span>
                                 </h2>
+                                <p class="only-transit" style="font-size:0.75rem; font-weight:600; color:var(--text-muted); margin:2px 0 0;">
+                                    Stock sistem &amp; adjustment hanya untuk lokasi <b>Transit</b> — stok Gudang Utama tidak tersentuh.
+                                </p>
                                 <p style="font-size:0.75rem; font-weight:500; color:var(--text-dim); margin:2px 0 0;">
                                     Hitung stock fisik gudang. Selisih <b style="color:var(--green);">plus (+)</b> otomatis masuk ke <b>Data Masuk</b>, selisih <b style="color:var(--red);">minus (−)</b> otomatis masuk ke <b>Data Keluar</b> sebagai <b>Adjustment</b>.
                                 </p>
@@ -7218,6 +7425,7 @@
                 <div style="display:flex; align-items:center; gap:8px; min-width:0;">
                     <i class="ph ph-file-text" style="color:var(--accent); font-size:1.25rem; flex-shrink:0;"></i>
                     <span style="font-size:0.95rem; font-weight:800; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Laporan Stock Opname</span>
+                    <span class="loc-pill only-transit">Lokasi: Transit</span>
                 </div>
             </div>
             <div style="padding:16px; max-width:1440px; margin:0 auto;">
@@ -7346,6 +7554,14 @@
         style="display:none; position:fixed; inset:0; background:rgba(15,18,34,0.45); backdrop-filter:blur(6px); z-index:9993; align-items:flex-end;">
         <div style="width:100%; background:var(--surface); border-radius:22px 22px 0 0; padding:12px 16px calc(20px + env(safe-area-inset-bottom, 0px)); display:flex; flex-direction:column; gap:8px; box-shadow:0 -20px 60px rgba(15,18,34,0.25);">
             <div style="width:44px; height:5px; border-radius:99px; background:var(--border-light); margin:0 auto 8px;"></div>
+            <!-- [TRANSIT] Pemilih lokasi untuk layar kecil (nav-strip desktop disembunyikan di mobile). -->
+            <div class="more-loc" role="group" aria-label="Lokasi inventory">
+                <span class="more-loc-lbl">Lokasi Inventory</span>
+                <div class="more-loc-seg">
+                    <button type="button" class="loc-btn" id="mloc-btn-GUDANG" data-loc="GUDANG" onclick="setInventoryLocation('GUDANG')" aria-pressed="false"><i class="ph ph-warehouse"></i><span>Gudang Utama</span></button>
+                    <button type="button" class="loc-btn" id="mloc-btn-TRANSIT" data-loc="TRANSIT" onclick="setInventoryLocation('TRANSIT')" aria-pressed="false"><i class="ph ph-truck"></i><span>Transit</span></button>
+                </div>
+            </div>
             <h3 style="margin:0 0 6px; font-size:0.8rem; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em;">Menu Lainnya</h3>
             <button class="more-item" data-tab="tab-masuk" onclick="_moreGo('tab-masuk')">
                 <i class="ph ph-download-simple"></i>
@@ -7380,7 +7596,7 @@
         <div style="background:var(--bg); width:100%; max-height:94dvh; border-radius:22px 22px 0 0; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 -20px 60px rgba(15,18,34,0.25);">
             <div style="display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0;">
                 <h3 style="margin:0; font-size:0.95rem; font-weight:800; color:var(--text); display:flex; align-items:center; gap:8px;">
-                    <i class="ph ph-upload-simple" style="color:var(--accent); font-size:1.2rem;"></i> Form Transaksi Keluar
+                    <i class="ph ph-upload-simple" style="color:var(--accent); font-size:1.2rem;"></i> Form Transaksi Keluar <span class="loc-pill only-transit">Transit</span>
                 </h3>
                 <button onclick="closeOutFormModal()" style="background:transparent; border:none; color:var(--text-dim); cursor:pointer; padding:6px; border-radius:8px; font-size:1.3rem;">
                     <i class="ph ph-x"></i>
@@ -7879,6 +8095,7 @@
             if (tabId === 'tab-dashboard') {
                 renderDashboard();
                 if (globalInboundData.length === 0 && currentUser) { loadInboundData(); setTimeout(renderDashboard, 800); }
+                if (_isTransit() && currentUser) loadTransitStatus();   // [TRANSIT]
             }
             if (tabId === 'tab-masuk') {
                 if (globalInboundData.length === 0) loadInboundData();
@@ -8305,6 +8522,17 @@
         }
 
         // ===================== GROUPED TABLE (tanggal) =====================
+        /**
+         * [TRANSIT] Penanda asal untuk Barang Masuk Transit hasil transfer:
+         *   "Dari Gudang Utama · TRF-… · Batch …"
+         * Baris biasa (tanpa transferId) tidak berubah sama sekali.
+         */
+        function _trfRowTag(row) {
+            if (!row || !row.transferId) return '';
+            return '<div class="trf-tag"><i class="ph ph-arrow-bend-down-right"></i>Dari Gudang Utama · <span class="mono">' +
+                _escHtml(row.transferId) + '</span>' + (row.batch ? ' · Batch ' + _escHtml(row.batch) : '') + '</div>';
+        }
+
         function renderGroupedTable(data, tbodyId, type) {
             const tbody = document.getElementById(tbodyId);
             const isOut = type === 'outbound';
@@ -8376,14 +8604,18 @@ const sorted = [...data].sort((a, b) => {
                     const delBtnIn = (currentUser && currentUser.role === 'ADMIN')
                         ? '<button onclick="deleteInboundRow(\'' + idSafe + '\')" style="background:var(--red-soft); border:1px solid rgba(220,38,38,0.25); color:var(--red); border-radius:8px; padding:6px 9px; cursor:pointer;"><i class="ph ph-trash" style="font-size:1.05rem;"></i></button>'
                         : '';
-                    const actionTd = '<td style="text-align:center;"><div style="display:inline-flex; gap:6px;">' +
+                    // [TRANSIT] Baris hasil transfer dikelola dari transaksi sumbernya —
+                    // tombol ubah/hapus diganti penanda (backend juga menolaknya).
+                    const actionTd = row.transferId
+                        ? '<td style="text-align:center;"><span class="trf-lock" title="Dibuat otomatis dari ' + _escHtml(row.transferId) + ' — ubah dari transaksi sumber"><i class="ph ph-lock-simple"></i> Otomatis</span></td>'
+                        : '<td style="text-align:center;"><div style="display:inline-flex; gap:6px;">' +
                         '<button onclick="editInboundItem(\'' + idSafe + '\',\'' + tglSafe + '\',\'' + nodoSafe + '\',\'' + parseFloat(row.qty || 0).toFixed(2) + '\',\'' + altuomSafe + '\',\'' + expSafe + '\')"' +
                         ' style="background:var(--accent-soft); border:1px solid var(--accent-brd); color:var(--accent); border-radius:8px; padding:6px 9px; cursor:pointer;">' +
                         '<i class="ph ph-pencil-simple" style="font-size:1.05rem;"></i></button>' + delBtnIn + '</div></td>';
                     buf.push('<tr class="' + rowCls + '">' +
                         '<td style="color:var(--text-muted); font-size:0.8rem; font-weight:500;">' + _escHtml(row.tanggal || '—') + '</td>' +
                         '<td class="mono">' + _escHtml(row.noDo || '—') + '</td>' +
-                        '<td style="font-weight:700; color:var(--text);">' + _escHtml(stripCode(row.namaItem)) + '</td>' +
+                        '<td style="font-weight:700; color:var(--text);">' + _escHtml(stripCode(row.namaItem)) + _trfRowTag(row) + '</td>' +
                         '<td style="color:var(--text-muted); font-size:0.8rem;">' + _escHtml(row.altUom || '—') + '</td>' +
                         '<td><span style="' + expStyle + '">' + _escHtml(expDateVal) + '</span></td>' +
                         '<td style="text-align:right; font-weight:800; color:var(--green); font-size:0.9rem;">+' + formatID(row.qty) + '</td>' +
@@ -11531,7 +11763,7 @@ const sorted = [...data].sort((a, b) => {
 
         function setUserRoleFilter(role) {
             _userRoleFilter = role;
-            ['ALL', 'ADMIN', 'MANAGER', 'KEEPER'].forEach(m => {
+            ['ALL', 'ADMIN', 'MANAGER', 'KEEPER', 'FLOOR'].forEach(m => {
                 const b = document.getElementById('urole-' + m);
                 if (!b) return;
                 const val = (m === 'KEEPER') ? 'STOCK KEEPER' : m;
@@ -11544,6 +11776,7 @@ const sorted = [...data].sort((a, b) => {
             const r = _normalizeRole(role);
             if (r === 'ADMIN')   return '<span class="urole urole-admin"><i class="ph ph-shield-check"></i>ADMIN</span>';
             if (r === 'MANAGER') return '<span class="urole urole-manager"><i class="ph ph-briefcase"></i>MANAGER</span>';
+            if (r === 'FLOOR')   return '<span class="urole urole-floor"><i class="ph ph-truck"></i>FLOOR</span>';   // [TRANSIT]
             return '<span class="urole urole-keeper"><i class="ph ph-package"></i>STOCK KEEPER</span>';
         }
 
@@ -12408,7 +12641,10 @@ const sorted = [...data].sort((a, b) => {
         // Stock Opname" final (kirim ke server). Isi Laporan Opname TIDAK
         // berubah — hanya dipindah dari tab ke overlay yang dibuka via tombol.
         // ============================================================
-        const _OPNAME_DRAFT_KEY = 'OPNAME_DRAFT_V1';
+        // [TRANSIT] Draft disimpan PER LOKASI: draft Gudang Utama tidak pernah
+        // terbuka di Stock Opname Transit (stock sistemnya berbeda). Kunci Gudang
+        // tetap sama persis seperti sebelumnya, jadi draft lama tetap terbaca.
+        function _opnameDraftKey() { return 'OPNAME_DRAFT_V1' + (_isTransit() ? '_TRANSIT' : ''); }
         let _opnameDraftActive  = false;
 
         // [UPGRADE v2] Nomor urut draft harian — LOKAL saja (tidak pernah dikirim ke backend).
@@ -12469,7 +12705,7 @@ const sorted = [...data].sort((a, b) => {
             }
             const draft = _snapshotOpnameDraft();
             try {
-                localStorage.setItem(_OPNAME_DRAFT_KEY, JSON.stringify(draft));
+                localStorage.setItem(_opnameDraftKey(), JSON.stringify(draft));
                 _opnameDraftActive = true;
                 _renderOpnameDraftBanner(draft, 'active');
                 if (typeof hapticFeedback === 'function') hapticFeedback('success');
@@ -12484,21 +12720,21 @@ const sorted = [...data].sort((a, b) => {
             if (!_opnameDraftActive) return;
             try {
                 const draft = _snapshotOpnameDraft();
-                localStorage.setItem(_OPNAME_DRAFT_KEY, JSON.stringify(draft));
+                localStorage.setItem(_opnameDraftKey(), JSON.stringify(draft));
                 _renderOpnameDraftBanner(draft, 'active');
             } catch (e) {}
         }, 700);
 
         function _getOpnameDraft() {
             try {
-                const raw = localStorage.getItem(_OPNAME_DRAFT_KEY);
+                const raw = localStorage.getItem(_opnameDraftKey());
                 if (!raw) return null;
                 const d = JSON.parse(raw);
                 if (!d || !Array.isArray(d.rows) || !d.rows.length) return null;
                 // Kompatibilitas draft lama (belum punya `code`): terbitkan sekali saat dibaca.
                 if (!d.code) {
                     d.code = _mintOpnameCode(d.tanggal);
-                    try { localStorage.setItem(_OPNAME_DRAFT_KEY, JSON.stringify(d)); } catch (e2) {}
+                    try { localStorage.setItem(_opnameDraftKey(), JSON.stringify(d)); } catch (e2) {}
                 }
                 _opnameDraftCode = d.code;
                 return d;
@@ -12626,7 +12862,7 @@ const sorted = [...data].sort((a, b) => {
         function _clearOpnameDraft() {
             _opnameDraftActive = false;
             _opnameDraftCode   = null;   // draft berikutnya berhak atas kode baru
-            try { localStorage.removeItem(_OPNAME_DRAFT_KEY); } catch (e) {}
+            try { localStorage.removeItem(_opnameDraftKey()); } catch (e) {}
         }
 
         // ---- Laporan Opname sebagai overlay (dibuka via tombol di Stock Opname) ----
@@ -14063,6 +14299,8 @@ const sorted = [...data].sort((a, b) => {
         // ---------- FORM BARANG MASUK ----------
         function _scanOpenInForm() {
             if (currentUser && !_canAccess('tab-masuk')) return _denyAccess('Data Masuk');
+            // [TRANSIT] Barang Masuk Transit tercatat otomatis dari Barang Keluar Gudang Utama.
+            if (_isTransit()) return showAlert('Info', 'Barang Masuk Transit tercatat otomatis dari Barang Keluar Gudang Utama. Untuk stok awal atau koreksi gunakan Stock Opname Transit.', 'info');
             const it = scanFlowState.item;
             _setTxt('scanf-in-name', stripCode(it.namaItem));
             _setTxt('scanf-in-meta', (_scanKodeItem(it.namaItem) || '—') + ' · ' + getKategoriFromNama(it.namaItem));
@@ -15989,12 +16227,17 @@ const sorted = [...data].sort((a, b) => {
         function _syncAppBar(tabId) {
             const bar = document.getElementById('app-bar-ctx');
             if (!bar) return;
-            const cfg = _APP_BAR[tabId] || _APP_BAR['tab-dashboard'];
+            let cfg = _APP_BAR[tabId] || _APP_BAR['tab-dashboard'];
+            // [TRANSIT] Barang Masuk Transit tidak diinput manual (otomatis dari
+            // Gudang Utama) → aksi utama halaman itu menjadi Muat Ulang.
+            if (_isTransit() && tabId === 'tab-masuk') {
+                cfg = Object.assign({}, cfg, { ico: 'ph ph-arrows-clockwise', act: 'loadInboundData()', lbl: 'Muat ulang Barang Masuk Transit' });
+            }
             const t = document.getElementById('app-bar-title');
             const u = document.getElementById('app-bar-sub');
             const a = document.getElementById('app-bar-action');
             if (t) t.textContent = cfg.t;
-            if (u) u.textContent = cfg.s;
+            if (u) u.textContent = (_isTransit() ? 'Transit · ' : '') + cfg.s;
             if (a) {
                 const i = a.querySelector('i');
                 if (i) i.className = cfg.ico;
@@ -16177,6 +16420,9 @@ const sorted = [...data].sort((a, b) => {
             // lebih baik satu boot lambat daripada menyisakan foto yang mungkin
             // sudah tidak cocok dengan data di server.
             try { u ? SIGAPCache.clear(u) : SIGAPCache.clearAll(); } catch (e) {}
+            // [TRANSIT] Satu transaksi bisa mengubah KEDUA lokasi (transfer
+            // otomatis), jadi foto lokasi Transit milik user ini ikut dibuang.
+            try { if (u) SIGAPCache.clear(u + '@TRANSIT'); } catch (e) {}
         }
 
         // Dipasang untuk SIGAPGateway (blok skrip di <head>, yang tidak bisa
@@ -16451,6 +16697,8 @@ const sorted = [...data].sort((a, b) => {
             'ADMIN':        ['tab-dashboard','tab-keluar','tab-riwayat-keluar','tab-masuk','tab-stock','tab-exp','tab-opname','tab-master','tab-recipe','tab-convert','tab-users'],
             'MANAGER':      ['tab-dashboard','tab-keluar','tab-riwayat-keluar','tab-masuk','tab-stock','tab-exp','tab-opname','tab-master','tab-recipe','tab-convert'],
             'STOCK KEEPER': ['tab-dashboard','tab-keluar','tab-riwayat-keluar','tab-masuk','tab-stock','tab-exp'],
+            // [TRANSIT] FLOOR = operasional lokasi Transit saja (lihat LOC_TABS).
+            'FLOOR':        ['tab-dashboard','tab-keluar','tab-riwayat-keluar','tab-masuk','tab-stock','tab-exp','tab-opname'],
             // --- Kompatibilitas role lama (dipetakan ke STOCK KEEPER) ---
             'STAFF':        ['tab-dashboard','tab-keluar','tab-riwayat-keluar','tab-masuk','tab-stock','tab-exp'],
             'VIEWER':       ['tab-dashboard','tab-keluar','tab-riwayat-keluar','tab-masuk','tab-stock','tab-exp']
@@ -16458,12 +16706,13 @@ const sorted = [...data].sort((a, b) => {
 
         /**
          * Normalisasi role — kembaran frontend dari normalizeUserRole_() di backend.
-         * ADMIN → ADMIN · MANAGER → MANAGER · STAFF/VIEWER/lainnya → STOCK KEEPER.
+         * ADMIN → ADMIN · MANAGER → MANAGER · FLOOR → FLOOR · STAFF/VIEWER/lainnya → STOCK KEEPER.
          */
         function _normalizeRole(role) {
             const r = (role || '').toString().trim().toUpperCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
             if (r === 'ADMIN' || r === 'ADMINISTRATOR') return 'ADMIN';
             if (r === 'MANAGER' || r === 'MANAJER')     return 'MANAGER';
+            if (r === 'FLOOR')                          return 'FLOOR';   // [TRANSIT]
             return 'STOCK KEEPER';
         }
 
@@ -16471,10 +16720,53 @@ const sorted = [...data].sort((a, b) => {
             return _normalizeRole(currentUser && currentUser.role);
         }
 
+        // ===================== [TRANSIT] LOKASI INVENTORY =====================
+        // Satu konteks terpusat: CURRENT_LOCATION = 'GUDANG' (Gudang Utama) atau
+        // 'TRANSIT'. Seluruh halaman memakai komponen yang SAMA; yang berbeda
+        // hanya lokasi yang dikirim ke backend (lihat _denganKonteks di
+        // SIGAPGateway). Master Item / Recipe / Convert / User hanya ada di
+        // Gudang Utama. Hak akses tetap diputuskan backend.
+        const LOC_GUDANG  = 'GUDANG';
+        const LOC_TRANSIT = 'TRANSIT';
+        const LOC_LABEL   = { GUDANG: 'Gudang Utama', TRANSIT: 'Transit' };
+        const LOC_TABS    = {
+            GUDANG:  null,   // null = semua tab sesuai role
+            TRANSIT: ['tab-dashboard','tab-keluar','tab-riwayat-keluar','tab-masuk','tab-stock','tab-exp','tab-opname']
+        };
+        const LOC_ROLES   = {
+            GUDANG:  ['ADMIN', 'MANAGER', 'STOCK KEEPER'],
+            TRANSIT: ['ADMIN', 'MANAGER', 'FLOOR']
+        };
+        let CURRENT_LOCATION = (function () {
+            try { return localStorage.getItem('SIGAP_LOC') === LOC_TRANSIT ? LOC_TRANSIT : LOC_GUDANG; }
+            catch (e) { return LOC_GUDANG; }
+        })();
+
+        // Dibaca SIGAPGateway pada setiap panggilan backend.
+        window.__sigapCallCtx = function () {
+            return { token: _authToken(), location: CURRENT_LOCATION === LOC_TRANSIT ? LOC_TRANSIT : '' };
+        };
+
+        function _isTransit() {
+            // try: aman dipanggil sebelum baris deklarasi ini dieksekusi (TDZ).
+            try { return CURRENT_LOCATION === LOC_TRANSIT; } catch (e) { return false; }
+        }
+        function _locAllowed(role, loc) { return LOC_ROLES[loc].indexOf(_normalizeRole(role)) !== -1; }
+        /** Lokasi yang sah untuk role: pilihan terakhir bila boleh, selain itu satu-satunya lokasi miliknya. */
+        function _locForRole(role) {
+            if (_locAllowed(role, CURRENT_LOCATION)) return CURRENT_LOCATION;
+            return _locAllowed(role, LOC_TRANSIT) ? LOC_TRANSIT : LOC_GUDANG;
+        }
+        /** Tab milik role, dipersempit ke tab yang ada di lokasi aktif. */
+        function _locTabs(roleTabs) {
+            const only = LOC_TABS[CURRENT_LOCATION];
+            return only ? roleTabs.filter(t => only.indexOf(t) !== -1) : roleTabs;
+        }
+
         /** Cek hak akses tab untuk user yang sedang login. */
         function _canAccess(tabId) {
             if (!currentUser) return false;
-            const allowed = ROLE_TABS[_currentRole()] || ROLE_TABS['STOCK KEEPER'];
+            const allowed = _locTabs(ROLE_TABS[_currentRole()] || ROLE_TABS['STOCK KEEPER']);   // [TRANSIT]
             return allowed.indexOf(tabId) !== -1;
         }
 
@@ -16506,6 +16798,7 @@ const sorted = [...data].sort((a, b) => {
 
         let _bootPrefetch = null;
         let _bootPrefetchEpoch = 0;
+        let _bootPrefetchLoc = null;   // [TRANSIT] lokasi saat prefetch dikirim
 
         // [LOGIN v2] Status alur autentikasi — semuanya hanya di memori.
         // Tidak ada password / hash / kredensial yang disimpan di mana pun;
@@ -16560,6 +16853,7 @@ const sorted = [...data].sort((a, b) => {
         function _prefetchBootstrap() {
             try {
                 _bootPrefetchEpoch = _writeEpoch;
+                _bootPrefetchLoc = CURRENT_LOCATION;   // [TRANSIT]
                 SIGAPPerf.mark('boot_p1_start');
                 // onRecover: false — dialog "Sambungan Terputus" tidak boleh
                 // muncul dari permintaan spekulatif ini, karena bisa menimpa
@@ -16921,6 +17215,16 @@ const sorted = [...data].sort((a, b) => {
             document.getElementById('user-chip-name').textContent = currentUser.nama || currentUser.username;
             // [UPGRADE] role dinormalisasi + ditampilkan sebagai badge (● MANAGER)
             currentUser.role = _normalizeRole(currentUser.role);
+            // [TRANSIT] Lokasi ditetapkan SEBELUM data dimuat: FLOOR selalu Transit,
+            // STOCK KEEPER selalu Gudang Utama, ADMIN/MANAGER memakai pilihan terakhir.
+            // Prefetch yang terkirim untuk lokasi lain dibuang, bukan dipakai.
+            const simpan = _locSavedFor(currentUser.username);
+            if (simpan === LOC_GUDANG || simpan === LOC_TRANSIT) CURRENT_LOCATION = simpan;
+            else if (!_bootPrefetch) CURRENT_LOCATION = LOC_GUDANG;   // user baru di perangkat ini → Gudang Utama
+            const lokasi = _locForRole(currentUser.role);
+            if (_bootPrefetchLoc !== lokasi) _bootPrefetch = null;
+            CURRENT_LOCATION = lokasi;
+            _locPersist();
             _renderRoleBadge(currentUser.role);
             applyRoleUI(currentUser.role);
             // Popup progres: informasikan ke user bahwa data sedang diambil,
@@ -16935,6 +17239,7 @@ const sorted = [...data].sort((a, b) => {
             // Jauh lebih cepat dibanding 4 panggilan terpisah. Fallback otomatis ke
             // 4 panggilan lama bila backend belum punya getBootstrapData.
             _bootstrapData();
+            if (_isTransit()) loadTransitStatus();   // [TRANSIT] status transfer untuk dashboard
         }
 
         // Optimisasi: Prioritaskan Master Data agar Form Keluar dan Scanner bisa instan digunakan,
@@ -16974,6 +17279,9 @@ const sorted = [...data].sort((a, b) => {
             const gen = ++_bootGen;
             const bootUser = currentUser && currentUser.username;
             const masihBerlaku = () => gen === _bootGen && !!currentUser && currentUser.username === bootUser;
+            // [TRANSIT] Foto data disimpan PER LOKASI — layar Transit tidak pernah
+            // terisi sekilas oleh angka Gudang Utama (atau sebaliknya).
+            const snapKey = bootUser ? bootUser + (_isTransit() ? '@TRANSIT' : '') : bootUser;
 
             // -------------------------------------------------------------
             // [PERF] LANGKAH 1 — ISI LAYAR SEKARANG JUGA DARI FOTO TERAKHIR.
@@ -16983,7 +17291,7 @@ const sorted = [...data].sort((a, b) => {
             // angka yang akhirnya dilihat user tetap angka asli dari Sheet.
             // -------------------------------------------------------------
             let adaSnapshot = false;
-            const snap = SIGAPCache.load(bootUser);
+            const snap = SIGAPCache.load(snapKey);
             if (snap) {
                 try {
                     // _applyBootstrapPayload() sudah memanggil DashBoot.finish()
@@ -16995,7 +17303,7 @@ const sorted = [...data].sort((a, b) => {
                 } catch (e) {
                     // Foto rusak / bentuknya tidak cocok dengan versi kode ini.
                     console.warn('Snapshot gagal dipakai, diabaikan:', e && e.message);
-                    SIGAPCache.clear(bootUser);
+                    SIGAPCache.clear(snapKey);
                     adaSnapshot = false;
                 }
             }
@@ -17024,7 +17332,7 @@ const sorted = [...data].sort((a, b) => {
                               // Disimpan HANYA bila (a) fase 1 & 2 sukses, (b) tidak ada
                               // penulisan sejak permintaan dikirim, (c) sesi masih sama.
                               if (!ctx.fase2Ok || !masihBerlaku() || _writeEpoch !== epochSaatKirim) return;
-                              SIGAPCache.save(bootUser, gabungan);
+                              SIGAPCache.save(snapKey, gabungan);
                           } };
 
             fase1
@@ -17180,7 +17488,8 @@ const sorted = [...data].sort((a, b) => {
         function applyRoleUI(role) {
             // [UPGRADE] role dinormalisasi dulu agar data lama (STAFF/VIEWER) aman.
             const norm    = _normalizeRole(role);
-            const allowed = ROLE_TABS[norm] || ROLE_TABS['STOCK KEEPER'];
+            // [TRANSIT] tab role dipersempit ke tab yang ada di lokasi aktif.
+            const allowed = _locTabs(ROLE_TABS[norm] || ROLE_TABS['STOCK KEEPER']);
 
             document.querySelectorAll('.tab-btn').forEach(btn => {
                 const tabId = btn.id.replace('btn-', '');
@@ -17238,6 +17547,7 @@ const sorted = [...data].sort((a, b) => {
 
             // [UPGRADE v2] Dashboard STOCK KEEPER: prioritas operasional + tanpa CTA "View".
             _dashApplyRoleCards(norm);
+            _applyLocationUI(norm);   // [TRANSIT] pemilih lokasi & elemen khusus lokasi
 
             const activeBtn = document.querySelector('.tab-btn.active');
             const activeTab = activeBtn ? activeBtn.id.replace('btn-', '') : null;
@@ -17250,10 +17560,11 @@ const sorted = [...data].sort((a, b) => {
             if (!el) return;
             const norm = _normalizeRole(role);
             el.textContent = norm;
-            el.classList.remove('role-admin', 'role-manager', 'role-keeper');
+            el.classList.remove('role-admin', 'role-manager', 'role-keeper', 'role-floor');
             el.classList.add('role-badge');
             if (norm === 'ADMIN')        el.classList.add('role-admin');
             else if (norm === 'MANAGER') el.classList.add('role-manager');
+            else if (norm === 'FLOOR')   el.classList.add('role-floor');   // [TRANSIT]
             else                         el.classList.add('role-keeper');
         }
 
@@ -17317,6 +17628,194 @@ const sorted = [...data].sort((a, b) => {
                     qt.removeAttribute('data-metric');
                 }
             }
+        }
+
+        // ===================== [TRANSIT] PEMILIH LOKASI & DASHBOARD TRANSIT =====================
+        // Pilihan lokasi diingat PER USER (perangkat bisa dipakai bergantian, mis.
+        // FLOOR lalu ADMIN). Kunci umum dipakai prefetch sebelum user diketahui.
+        function _locPersist() {
+            try {
+                localStorage.setItem('SIGAP_LOC', CURRENT_LOCATION);
+                if (currentUser && currentUser.username) localStorage.setItem('SIGAP_LOC:' + currentUser.username, CURRENT_LOCATION);
+            } catch (e) {}
+        }
+        function _locSavedFor(username) {
+            try { return username ? localStorage.getItem('SIGAP_LOC:' + username) : null; } catch (e) { return null; }
+        }
+
+        /** Sinkronkan seluruh penanda lokasi di layar (dipanggil applyRoleUI). */
+        function _applyLocationUI(role) {
+            const tr = _isTransit();
+            const r  = role || _currentRole();
+            document.body.classList.toggle('loc-transit', tr);
+            ['loc-btn-', 'mloc-btn-'].forEach(pre => {
+                [LOC_GUDANG, LOC_TRANSIT].forEach(loc => {
+                    const b = document.getElementById(pre + loc);
+                    if (!b) return;
+                    const on = loc === CURRENT_LOCATION;
+                    b.style.display = _locAllowed(r, loc) ? '' : 'none';
+                    b.classList.toggle('active', on);
+                    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+                });
+            });
+            const chip = document.getElementById('app-bar-loc');
+            if (chip) {
+                chip.innerHTML = '<i class="ph ' + (tr ? 'ph-truck' : 'ph-warehouse') + '"></i><span>' + LOC_LABEL[CURRENT_LOCATION] + '</span>';
+                chip.setAttribute('aria-label', 'Lokasi aktif: ' + LOC_LABEL[CURRENT_LOCATION] + '. Ketuk untuk ganti lokasi.');
+            }
+            // Kartu Stock: filter "Lokasi" membaca kolom lokasi Master Item. Di
+            // lokasi Transit filter itu disembunyikan dan semua item ditampilkan.
+            const fl = document.getElementById('filter-stock-lokasi');
+            if (fl) fl.value = tr ? 'ALL' : 'GUDANG';
+            const at = document.getElementById('app-bar-ctx');
+            if (at) _syncAppBar((document.querySelector('.tab-btn.active') || { id: 'btn-tab-dashboard' }).id.replace('btn-', ''));
+        }
+
+        /**
+         * Ganti lokasi aktif. Memakai jalur reset yang SAMA dengan pergantian
+         * user (_resetAppState) lalu memuat ulang data — sehingga tidak ada satu
+         * pun angka lokasi lama yang tertinggal di layar.
+         */
+        function setInventoryLocation(loc) {
+            loc = (loc === LOC_TRANSIT) ? LOC_TRANSIT : LOC_GUDANG;
+            if (!currentUser) return;
+            closeMoreSheet();
+            if (!_locAllowed(currentUser.role, loc)) return _denyAccess('lokasi ' + LOC_LABEL[loc]);
+            if (loc === CURRENT_LOCATION) return;
+
+            const activeBtn = document.querySelector('.tab-btn.active');
+            const keepTab   = activeBtn ? activeBtn.id.replace('btn-', '') : 'tab-dashboard';
+            const user      = currentUser;
+
+            CURRENT_LOCATION = loc;
+            _locPersist();
+            _resetAppState();
+            _opnameDraftActive = false;   // draft opname milik lokasi sebelumnya tidak ikut
+            _opnameDraftCode   = null;
+            _trfStatus         = null;
+            currentUser = user;
+            _startApp();
+            if (keepTab !== 'tab-dashboard' && _canAccess(keepTab)) switchTab(keepTab);
+            if (window.Swal) Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Lokasi: ' + LOC_LABEL[loc],
+                                         showConfirmButton: false, timer: 1600, background: 'var(--surface)', color: 'var(--text)' });
+        }
+
+        /** Chip lokasi di app bar mobile → buka menu yang memuat pemilih lokasi. */
+        function _locChipTap() {
+            if (!currentUser) return;
+            const both = _locAllowed(currentUser.role, LOC_GUDANG) && _locAllowed(currentUser.role, LOC_TRANSIT);
+            if (both) openMoreSheet();
+        }
+
+        let _trfStatus = null;
+
+        function loadTransitStatus() {
+            if (!_isTransit() || !currentUser) return;
+            google.script.run
+                .withSuccessHandler(res => {
+                    if (!_isTransit()) return;
+                    if (res && res.success) { _trfStatus = res.data; renderTransitPanel(); }
+                })
+                .withFailureHandler(() => { /* panel tetap tampil tanpa status */ })
+                .getTransitStatus({});
+        }
+
+        const _TRF_STATUS_UI = {
+            COMPLETED:  { t: 'Selesai',     c: 'var(--green)' },
+            PENDING:    { t: 'Tertunda',    c: 'var(--amber)' },
+            FAILED:     { t: 'Gagal',       c: 'var(--red)' },
+            DIBATALKAN: { t: 'Dibatalkan',  c: 'var(--text-dim)' }
+        };
+
+        function renderTransitPanel() {
+            const panel = document.getElementById('trf-panel');
+            if (!panel || !_isTransit()) return;
+            const st = _trfStatus;
+
+            const m0 = getJakartaDate(); m0.setDate(1); m0.setHours(0, 0, 0, 0);
+            const mStart = m0.getTime();
+            // Hitungan bulanan dari buku besar TRANSFER di server (satu transfer =
+            // satu hitungan walau terpecah per EXP). Sebelum status tiba: dari data
+            // di layar, dihitung per Transfer ID unik.
+            const nTrf   = (rows) => new Set((rows || []).filter(r => (r.rawDate || 0) >= mStart && r.transferId).map(r => r.transferId)).size;
+            const nSpb   = (rows) => new Set((rows || []).filter(r => (r.rawDate || 0) >= mStart && (r.status || '').toUpperCase() === 'KELUAR').map(r => r.noSpb || r.id)).size;
+            const inBln  = (st && st.monthToTransit  != null) ? st.monthToTransit  : nTrf(globalInboundData);
+            const outBln = (st && st.monthOutTransit != null) ? st.monthOutTransit : nSpb(globalOutboundData);
+            _setText('trf-sku', (globalStockData || []).filter(s => (parseFloat(s.sisa) || 0) > 0).length);
+            _setText('trf-in',  formatID(inBln));
+            _setText('trf-out', formatID(outBln));
+
+            const state = document.getElementById('trf-state');
+            const pend  = st ? st.pendingForward : 0;
+            _setText('trf-pending', st ? pend : '—');
+            _setText('trf-pending-sub', st ? 'Barang Keluar Gudang belum masuk Transit' : 'memuat…');
+            if (state) {
+                let t = 'Memuat…', cls = '';
+                if (st) {
+                    if (st.failed > 0)  { t = st.failed + ' gagal'; cls = 'is-failed'; }
+                    else if (pend > 0)  { t = pend + ' tertunda';  cls = 'is-pending'; }
+                    else                { t = 'Tersinkron';        cls = 'is-synced'; }
+                }
+                state.textContent = t;
+                state.className = 'trf-state ' + cls;
+            }
+            const last = document.getElementById('trf-last');
+            if (last) {
+                last.textContent = !st ? 'Status transfer belum termuat.'
+                    : (st.lastSync ? 'Sync terakhir: ' + st.lastSync.at + ' · ' + st.lastSync.by
+                                   : 'Transfer berjalan otomatis — Sync hanya untuk pemulihan.') +
+                      (st && st.cutover ? ' · Mulai berlaku ' + _fmtTanggalPanjang(st.cutover) : '');
+            }
+
+            const box = document.getElementById('trf-recent');
+            if (!box) return;
+            const rows = st ? (st.recent || []).slice(0, 8) : [];
+            if (!rows.length) {
+                box.innerHTML = '<div class="dash-empty" style="padding:18px;"><i class="ph ph-truck" style="color:var(--text-dim);"></i>' +
+                    (st ? 'Belum ada transfer. Barang Keluar Gudang Utama otomatis masuk ke sini.' : 'Memuat riwayat transfer…') + '</div>';
+                return;
+            }
+            box.innerHTML = rows.map(r => {
+                const ui  = _TRF_STATUS_UI[r.status] || { t: r.status, c: 'var(--text-dim)' };
+                const col = 'var(--green)';
+                return '<div class="act-row">' +
+                    '<div class="act-dot" style="background:color-mix(in srgb,' + col + ' 14%,transparent); color:' + col + ';"><i class="ph ph-arrow-down"></i></div>' +
+                    '<div class="act-body"><div class="act-name">' + _escHtml(r.displayName || r.namaItem) + '</div>' +
+                    '<div class="act-time"><span class="mono">' + _escHtml(r.transferId) + '</span> · ' +
+                    'Gudang Utama → Transit' + (r.catatan ? ' · ' + _escHtml(r.catatan.replace(/^SPB\s+/, '')) : '') +
+                    ' · ' + _escHtml(r.tanggal) + '</div></div>' +
+                    '<span class="act-qty" style="color:' + col + ';">' + formatID(r.qty) + ' <span style="color:var(--text-dim); font-weight:600;">' + _escHtml(r.uom || '') + '</span>' +
+                    '<span class="trf-badge" style="color:' + ui.c + ';">' + ui.t + '</span></span>' +
+                '</div>';
+            }).join('');
+        }
+
+        /** SYNC TRANSIT — pemulihan manual (transfer normalnya otomatis). Idempoten di server. */
+        function syncTransitNow() {
+            if (!_isTransit()) return;
+            const btn = document.getElementById('btn-trf-sync');
+            if (btn && btn.disabled) return;
+            if (btn) btn.disabled = true;
+            showLoader(true);
+            google.script.run
+                .withSuccessHandler(res => {
+                    showLoader(false);
+                    if (btn) btn.disabled = false;
+                    if (_handleAuthError(res)) return;
+                    if (!res || !res.success) return showAlert('Gagal', (res && res.message) || 'Sync Transit gagal.', 'error');
+                    const gagal = res.data && res.data.failed > 0;
+                    Swal.fire({ title: gagal ? 'Sync Sebagian Gagal' : 'Sync Transit Selesai', text: res.message,
+                                icon: gagal ? 'warning' : 'success', background: 'var(--surface)', color: 'var(--text)', confirmButtonColor: 'var(--accent)' });
+                    globalStockData = []; globalInboundData = []; globalOutboundData = [];
+                    loadStockDataSilent(); loadOutboundDataSilent(); loadInboundData();
+                    loadTransitStatus();
+                })
+                .withFailureHandler(() => {
+                    showLoader(false);
+                    if (btn) btn.disabled = false;
+                    showAlert('Error', 'Koneksi Server Gagal', 'error');
+                })
+                .syncTransit({});
         }
 
         // ===================== EXP MONITOR — KALENDER =====================
@@ -18511,6 +19010,7 @@ const sorted = [...data].sort((a, b) => {
             if (typeof refreshMasterStats === 'function') refreshMasterStats(null, true);
             // [SMART EXP] Rekomendasi ikut dihitung ulang saat dashboard di-refresh.
             if (typeof loadSmartExp === 'function') loadSmartExp(true);
+            loadTransitStatus();   // [TRANSIT] status transfer ikut disegarkan
             renderDashboard();
             setTimeout(renderDashboard, 900);
         }
@@ -18784,6 +19284,7 @@ const sorted = [...data].sort((a, b) => {
                     }).join('');
                 }
             }
+            renderTransitPanel();   // [TRANSIT] hanya menggambar bila lokasi aktif = Transit
         }
 
         // ===================== BARCODE GENERATOR & PRINT =====================
@@ -19715,8 +20216,16 @@ const sorted = [...data].sort((a, b) => {
             return html;
         }
 
+        /** [TRANSIT] Laporan lokasi Transit diberi label lokasi (judul + baris filter). Laporan Gudang tidak berubah. */
+        function _rptTagLokasi(config) {
+            if (!config || !_isTransit()) return config;
+            config.title = config.title + ' Transit';
+            config.filters = [{ label: 'Lokasi', value: 'TRANSIT' }].concat(config.filters || []);
+            return config;
+        }
+
         function exportFilteredReportExcel(type) {
-            const config = _getCurrentFilteredData(type);
+            const config = _rptTagLokasi(_getCurrentFilteredData(type));   // [TRANSIT]
             if (!config || !config.rows || !config.rows.length) { showAlert('Info', 'Tidak ada data untuk diekspor.', 'info'); return; }
             const html = generateExcelHTML(config);
             const blob = new Blob(['\ufeff', html], { type: 'application/vnd.ms-excel' });
@@ -19730,7 +20239,7 @@ const sorted = [...data].sort((a, b) => {
         }
 
         function printFilteredReport(type) {
-            const config = _getCurrentFilteredData(type);
+            const config = _rptTagLokasi(_getCurrentFilteredData(type));   // [TRANSIT]
             if (!config || !config.rows || !config.rows.length) { showAlert('Info', 'Tidak ada data untuk dicetak.', 'info'); return; }
             const jkt = (typeof getJakartaDate === 'function') ? getJakartaDate() : new Date();
             const ts = _fmtDMY(jkt) + ' · ' + String(jkt.getHours()).padStart(2,'0') + ':' + String(jkt.getMinutes()).padStart(2,'0') + ' WIB';
